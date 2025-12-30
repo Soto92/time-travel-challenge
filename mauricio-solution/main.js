@@ -40,12 +40,58 @@ async function geocodeCity(cityName) {
   };
 }
 
-async function getEarthHeliocentricPosition(dateISO) {
+function parseEarthVector(lines, startIndex) {
+  const block = lines.slice(startIndex, startIndex + 10).join("\n");
+
+  const x = block.match(/X\s*=\s*([-\d.E+]+)/);
+  const y = block.match(/Y\s*=\s*([-\d.E+]+)/);
+  const z = block.match(/Z\s*=\s*([-\d.E+]+)/);
+
+  if (!x || !y || !z) {
+    throw new Error("Failed to parse Earth position");
+  }
+
   return {
-    x: Math.sin(Date.parse(dateISO) / 1e11),
-    y: Math.cos(Date.parse(dateISO) / 1e11),
-    z: Math.sin(Date.parse(dateISO) / 1e12),
+    x: parseFloat(x[1]),
+    y: parseFloat(y[1]),
+    z: parseFloat(z[1]),
   };
+}
+
+async function getEarthHeliocentricPosition(dateISO) {
+  const params = new URLSearchParams({
+    format: "json",
+    COMMAND: "'399'",
+    CENTER: "'500@0'",
+    EPHEM_TYPE: "V",
+    VEC_TABLE: "2",
+    START_TIME: dateISO,
+    STOP_TIME: new Date(Date.parse(dateISO) + 86400000).toISOString(),
+    STEP_SIZE: "1d",
+    REF_SYSTEM: "ICRF",
+    OUT_UNITS: "AU",
+  });
+
+  const url = `https://ssd.jpl.nasa.gov/api/horizons.api?${params.toString()}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch Earth position from NASA");
+  }
+  const data = await res.json();
+  const lines = data?.result?.split("\n");
+  if (!lines) {
+    throw new Error("Invalid NASA response");
+  }
+
+  const start = lines.findIndex((l) => l.includes("$$SOE"));
+  const end = lines.findIndex((l) => l.includes("$$EOE"));
+
+  if (start === -1 || end === -1) {
+    throw new Error("No ephemeris data found");
+  }
+
+  return parseEarthVector(lines, start);
 }
 
 async function findSafeTemporalWindows(cityName, targetYear) {
